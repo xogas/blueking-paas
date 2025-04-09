@@ -271,11 +271,36 @@ class AppDeclarativeController:
     def sync_services_fields(self, application: Application, desc: Dict[str, ModuleDesc]):
         """Sync services related field for application"""
         dependency_tree: Dict[str, List[str]] = {}
+        # 构建服务依赖关系映射
+        service_dependencies: Dict[str, Dict[str, str]] = {}
         for module_name, module_desc in desc.items():
             dependency_tree[module_name] = []
+            service_dependencies[module_name] = {}
             for service in module_desc.services:
                 if service.shared_from:
                     dependency_tree[module_name].append(service.shared_from)
+                    # 记录每个模块中各服务的依赖来源
+                    service_dependencies[module_name][service.name] = service.shared_from
+
+        # 验证是否存在多级依赖
+        invalid_dependencies = []
+        for module_name, services in service_dependencies.items():
+            for service_name, shared_from in services.items():
+                if shared_from in service_dependencies and service_name in service_dependencies[shared_from]:
+                    source_module = service_dependencies[shared_from][service_name]
+                    invalid_dependencies.append(
+                        f'Module "{module_name}" depends with module "{shared_from}" on service "{service_name}", '
+                        f'but "{shared_from}" depends with "{source_module}" on the same service'
+                    )
+
+        # 如果存在多级依赖, 则抛出异常
+        if invalid_dependencies:
+            error_message = (
+                "Multi-level dependency of service was detected, this configuration is not supported:\n"
+                + "\n".join(invalid_dependencies)
+            )
+            logger.error(error_message)
+            raise ControllerError(error_message)
 
         # NOTE: 由 AppDescriptionSLZ 校验 shared_from 的模块是否存在, 这里不再重复校验
         for module_name in flatten_dependency_tree(dependency_tree):
