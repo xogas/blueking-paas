@@ -197,6 +197,9 @@ class LogAPIView(LogBaseAPIView):
     line_model: ClassVar[Type]
     logs_serializer_class: ClassVar[Type[Serializer]]
 
+    # The default number of lines to view when retrieving current logs from Pod
+    view_cur_log_lines_limit = 400
+
     @swagger_auto_schema(
         query_serializer=serializers.LogQueryParamsSLZ,
         request_body=serializers.LogQueryBodySLZ,
@@ -249,47 +252,18 @@ class LogAPIView(LogBaseAPIView):
     @transform_noindex_error
     @transform_bklog_error
     def query_logs_scroll(self, request, code, module_name, environment):
-        """查询标准输出日志"""
-        log_client, log_config = self.instantiate_log_client()
-        search = self.make_search(
-            mappings=log_client.get_mappings(
-                log_config.search_params.indexPattern,
-                time_range=self.parse_time_range(),
-                timeout=settings.DEFAULT_ES_SEARCH_TIMEOUT,
-            ),
-            time_field=log_config.search_params.timeField,
-            highlight_fields=(log_config.search_params.messageField,),
-        )
+        """查询标准输出日志
 
-        try:
-            response, total = log_client.execute_scroll_search(
-                index=log_config.search_params.indexPattern,
-                search=search,
-                timeout=settings.DEFAULT_ES_SEARCH_TIMEOUT,
-                scroll_id=request.query_params.get("scroll_id"),
-            )
-        except ScanError:
-            # scan 失败大概率是 scroll_id 失效
-            logger.exception("scroll_id 失效, 日志查询失败")
-            raise error_codes.QUERY_LOG_FAILED.f(_("日志查询快照失效, 请刷新后重试。"))
-        except (RequestError, BkLogApiError) as e:
-            # # 用户输入数据不符合 ES 语法等报错，不需要记录到 Sentry，仅打 error 日志即可
-            logger.error("request error when querying logs: %s", e)  # noqa: TRY400
-            raise error_codes.QUERY_REQUEST_ERROR
-        except Exception:
-            logger.exception("failed to get logs")
-            raise error_codes.QUERY_LOG_FAILED.f(_("日志查询失败，请稍后再试。"))
-
-        logs = cattr.structure(
-            {
-                "logs": clean_logs(list(response), log_config.search_params),
-                "total": total,
-                "dsl": json.dumps(search.to_dict()),
-                "scroll_id": response._scroll_id,
-            },
-            Logs[self.line_model],  # type: ignore
-        )
-        return Response(data=self.logs_serializer_class(logs).data)
+        支持两种查询方式:
+        1. 通过 ES 查询 - 基于时间范围, 支持分页和滚动查询
+        2. 通过 Pod 直接查询 - 基于日志行数
+        """
+        # 检查是否使用Pod直接查询
+        use_pod_query = request.query_params.get("use_pod_query", "").lower() in ("true", "1", "yes")
+        if use_pod_query:
+            return self._query_logs_from_pod(request, code, module_name, environment)
+        else:
+            return self._query_logs_from_es(request, code, module_name, environment)
 
     @swagger_auto_schema(
         query_serializer=serializers.LogQueryParamsSLZ,
@@ -358,6 +332,63 @@ class LogAPIView(LogBaseAPIView):
             fields_filters = [f for f in fields_filters if matcher.fullmatch(f.name)]
 
         return Response(data=serializers.LogFieldFilterSLZ(fields_filters, many=True).data)
+
+    def _query_logs_from_pod(self, request, code, module_name, environment):
+        """从 Pod 查询标准输出日志 (目前限制 400 行)"""
+        # env = self.get_env_via_path()
+
+        # manger = ProcessManager(env)
+        # try:
+        #     logs = manger.get_current_logs(
+        #         process_type, process_instance_name, tail_lines=self.view_cur_log_lines_limit
+        #     )
+        # except PreviousInstanceNotFound:
+        #     return Response(status=status.HTTP_204_NO_CONTENT)
+
+        # return Response(data=logs.splitlines())
+
+    def _query_logs_from_es(self, request, code, module_name, environment):
+        """从 ES 查询标准输出日志"""
+        log_client, log_config = self.instantiate_log_client()
+        search = self.make_search(
+            mappings=log_client.get_mappings(
+                log_config.search_params.indexPattern,
+                time_range=self.parse_time_range(),
+                timeout=settings.DEFAULT_ES_SEARCH_TIMEOUT,
+            ),
+            time_field=log_config.search_params.timeField,
+            highlight_fields=(log_config.search_params.messageField,),
+        )
+
+        try:
+            response, total = log_client.execute_scroll_search(
+                index=log_config.search_params.indexPattern,
+                search=search,
+                timeout=settings.DEFAULT_ES_SEARCH_TIMEOUT,
+                scroll_id=request.query_params.get("scroll_id"),
+            )
+        except ScanError:
+            # scan 失败大概率是 scroll_id 失效
+            logger.exception("scroll_id 失效, 日志查询失败")
+            raise error_codes.QUERY_LOG_FAILED.f(_("日志查询快照失效, 请刷新后重试。"))
+        except (RequestError, BkLogApiError) as e:
+            # # 用户输入数据不符合 ES 语法等报错，不需要记录到 Sentry，仅打 error 日志即可
+            logger.error("request error when querying logs: %s", e)  # noqa: TRY400
+            raise error_codes.QUERY_REQUEST_ERROR
+        except Exception:
+            logger.exception("failed to get logs")
+            raise error_codes.QUERY_LOG_FAILED.f(_("日志查询失败，请稍后再试。"))
+
+        logs = cattr.structure(
+            {
+                "logs": clean_logs(list(response), log_config.search_params),
+                "total": total,
+                "dsl": json.dumps(search.to_dict()),
+                "scroll_id": response._scroll_id,
+            },
+            Logs[self.line_model],  # type: ignore
+        )
+        return Response(data=self.logs_serializer_class(logs).data)
 
 
 class StdoutLogAPIView(LogAPIView):
