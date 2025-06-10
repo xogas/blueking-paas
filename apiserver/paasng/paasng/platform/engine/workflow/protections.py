@@ -155,6 +155,7 @@ class ModuleEnvDeployInspector(BaseConditionChecker):
     """Prepare to deploy a ModuleEnvironment"""
 
     condition_classes = [
+        # TODO: 这里添加新的检查条件? 检查镜像仓库地址, 私有镜像需要添加镜像凭证
         ProductInfoCondition,
         EnvProtectionCondition,
         RepoAccessCondition,
