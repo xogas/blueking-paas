@@ -72,6 +72,11 @@ class RepoAccessCondition(DeployCondition):
     """检查用户是否有该模块的源码仓库的访问权限"""
 
     def validate(self):
+        # 镜像应用不检查源码仓库的访问权限
+        module: Module = self.env.module
+        if ModuleSpecs(module).runtime_type == RuntimeType.CUSTOM_IMAGE:
+            return
+
         try:
             # TODO: We should also check the return value.
             get_version_service(self.env.module, operator=self.user.pk).touch()
@@ -96,6 +101,22 @@ class RepoAccessCondition(DeployCondition):
         except Exception as e:
             message = _("获取源码仓库信息失败，请确保仓库信息填写正确")
             action = DeployConditions.NEED_TO_CORRECT_REPO_INFO.value
+            raise ConditionNotMatched(message, action) from e
+
+
+class ImageRepositoryCondition(DeployCondition):
+    """检查镜像仓库的访问权限"""
+
+    def validate(self):
+        module: Module = self.env.module
+        if ModuleSpecs(module).runtime_type != RuntimeType.CUSTOM_IMAGE:
+            return
+
+        try:
+            get_version_service(self.env.module, operator=self.user.pk).touch()
+        except UserNotBindedToSourceProviderError as e:
+            message = _("当前用户尚未授权访问镜像仓库")
+            action = DeployConditions.CHECK_CI_GIT_TOKEN.value
             raise ConditionNotMatched(message, action) from e
 
 
@@ -160,6 +181,7 @@ class ModuleEnvDeployInspector(BaseConditionChecker):
         RepoAccessCondition,
         ProcfileCondition,
         PluginTagValidationCondition,
+        ImageRepositoryCondition,
     ]
 
     def __init__(self, user: "User", env: "ModuleEnvironment"):
