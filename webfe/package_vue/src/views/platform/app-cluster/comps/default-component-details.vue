@@ -34,6 +34,11 @@
                 :label="`HTTPS ${$t('端口')}：`"
                 :value="values?.service?.nodePorts?.https || '--'"
               />
+              <DetailsRow
+                :label-width="configLabelWidth"
+                :label="`HTTPS ${$t('副本数量')}：`"
+                :value="values?.replicaCount || '--'"
+              />
             </template>
             <template v-else>
               <!-- hostNetwork -->
