@@ -53,6 +53,8 @@ var (
 	AppNameRegex = regexp.MustCompile("^[a-z0-9-]{1,39}$")
 	// ProcNameRegex 进程名称格式
 	ProcNameRegex = regexp.MustCompile("^[a-z0-9]([-a-z0-9]){1,11}$")
+	// ResQuotaPlanRegex 自定义资源配额格式
+	ResQuotaPlanRegex = regexp.MustCompile(`^([1-9]\d*(?:\.\d+)?|0\.\d+)C([1-9]\d*(?:\.\d+)?|0\.\d+)(M|Mi|G|Gi)$`)
 )
 
 // MaxDNSNameservers is the max number of nameservers in DomainResolution
@@ -392,9 +394,11 @@ func (r *BkApp) validateAppProc(proc Process, idx int) *field.Error {
 	}
 
 	// 3. 检查资源方案是否是受支持的
-	if !lo.Contains(AllowedResQuotaPlans, proc.ResQuotaPlan) {
-		return field.NotSupported(
-			pField.Child("resQuotaPlan"), proc.ResQuotaPlan, stringx.ToStrArray(AllowedResQuotaPlans),
+	if !IsAvailableResQuotaPlan(proc.ResQuotaPlan) {
+		return field.Invalid(
+			pField.Child("resQuotaPlan"),
+			proc.ResQuotaPlan,
+			"invalid resource quota plan format. Supported formats: predefined plans (default, 4C1G, 4C2G, 4C4G) or custom format {CPU}C{Memory} (e.g., 2C400Mi, 4C1G, 0.5C512Mi)",
 		)
 	}
 
@@ -744,9 +748,11 @@ func (r *BkApp) validateEnvOverlay() *field.Error {
 		if !lo.Contains(r.getProcNames(), q.Process) {
 			return field.Invalid(resQuotaField.Child("process"), q.Process, "process name is invalid")
 		}
-		if !lo.Contains(AllowedResQuotaPlans, q.Plan) {
-			return field.NotSupported(
-				resQuotaField.Child("plan"), q.Plan, stringx.ToStrArray(AllowedResQuotaPlans),
+		if !IsAvailableResQuotaPlan(q.Plan) {
+			return field.Invalid(
+				resQuotaField.Child("plan"),
+				q.Plan,
+				"invalid resource quota plan format. Supported formats: predefined plans (default, 4C1G, 4C2G, 4C4G) or custom format {CPU}C{Memory} (e.g., 2C400Mi, 4C1G, 0.5C512Mi)",
 			)
 		}
 	}
@@ -807,4 +813,29 @@ func (r *BkApp) validateComponents() *field.Error {
 		}
 	}
 	return nil
+}
+
+// IsAvailableResQuotaPlan checks whether the given resource quota plan is supported
+func IsAvailableResQuotaPlan(plan ResQuotaPlan) bool {
+	if lo.Contains(AllowedResQuotaPlans, plan) {
+		return true
+	}
+
+	matches := ResQuotaPlanRegex.FindStringSubmatch(string(plan))
+	if len(matches) != 4 {
+		return false
+	}
+
+	cpuStr, memStr, memUnit := matches[1], matches[2], matches[3]
+
+	if _, err := quota.NewQuantity(cpuStr, quota.CPU); err != nil {
+		return false
+	}
+
+	memoryStr := fmt.Sprintf("%s%s", memStr, memUnit)
+	if _, err := quota.NewQuantity(memoryStr, quota.Memory); err != nil {
+		return false
+	}
+
+	return true
 }

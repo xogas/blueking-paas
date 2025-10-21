@@ -306,4 +306,71 @@ var _ = Describe("Environment overlay related functions", func() {
 			Expect(resReq.Limits.Memory().Equal(resource.MustParse("2Gi"))).To(BeTrue())
 		})
 	})
+
+	Context("Test parseCustomResQuotaPlan", func() {
+		It("should parse valid custom plan", func() {
+			getter := NewProcResourcesGetter(bkapp)
+			cpu, mem, ok := getter.parseCustomResQuotaPlan("4C2G")
+			Expect(ok).To(BeTrue())
+			Expect(cpu).To(Equal("4000m"))
+			Expect(mem).To(Equal("1907Mi"))
+		})
+
+		It("should parse custom plan with decimal", func() {
+			getter := NewProcResourcesGetter(bkapp)
+			cpu, mem, ok := getter.parseCustomResQuotaPlan("0.5C1.5G")
+			Expect(ok).To(BeTrue())
+			Expect(cpu).To(Equal("500m"))
+			Expect(mem).To(Equal("1430Mi"))
+		})
+
+		It("should parse custom plan with M unit", func() {
+			getter := NewProcResourcesGetter(bkapp)
+			cpu, mem, ok := getter.parseCustomResQuotaPlan("2C512M")
+			Expect(ok).To(BeTrue())
+			Expect(cpu).To(Equal("2000m"))
+			// 512M = 512*1000*1000 bytes ≈ 488 MiB
+			Expect(mem).To(Equal("488Mi"))
+		})
+
+		It("should parse custom plan with Gi unit", func() {
+			getter := NewProcResourcesGetter(bkapp)
+			cpu, mem, ok := getter.parseCustomResQuotaPlan("4C2Gi")
+			Expect(ok).To(BeTrue())
+			Expect(cpu).To(Equal("4000m"))
+			Expect(mem).To(Equal("2048Mi"))
+		})
+
+		It("should parse custom plan with Mi unit", func() {
+			getter := NewProcResourcesGetter(bkapp)
+			cpu, mem, ok := getter.parseCustomResQuotaPlan("4C2048Mi")
+			Expect(ok).To(BeTrue())
+			Expect(cpu).To(Equal("4000m"))
+			Expect(mem).To(Equal("2048Mi"))
+		})
+
+		It("should return false for invalid format", func() {
+			getter := NewProcResourcesGetter(bkapp)
+			_, _, ok := getter.parseCustomResQuotaPlan("invalid")
+			Expect(ok).To(BeFalse())
+		})
+
+		It("should return false for zero CPU", func() {
+			getter := NewProcResourcesGetter(bkapp)
+			_, _, ok := getter.parseCustomResQuotaPlan("0C1G")
+			Expect(ok).To(BeFalse())
+		})
+
+		It("should return false for zero memory", func() {
+			getter := NewProcResourcesGetter(bkapp)
+			_, _, ok := getter.parseCustomResQuotaPlan("1C0G")
+			Expect(ok).To(BeFalse())
+		})
+
+		It("should return false for invalid unit", func() {
+			getter := NewProcResourcesGetter(bkapp)
+			_, _, ok := getter.parseCustomResQuotaPlan("1C1X")
+			Expect(ok).To(BeFalse())
+		})
+	})
 })

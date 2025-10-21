@@ -19,8 +19,11 @@
 package envs
 
 import (
+	"fmt"
+
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	paasv1alpha2 "bk.tencent.com/paas-app-operator/api/v1alpha2"
@@ -256,9 +259,42 @@ func (r *ProcResourcesGetter) fromQuotaPlan(plan paasv1alpha2.ResQuotaPlan) core
 	case paasv1alpha2.ResQuotaPlan4C4G:
 		cpuRaw, memRaw = "4000m", "4096Mi"
 	default:
-		cpuRaw, memRaw = config.Global.GetProcDefaultCpuLimit(), config.Global.GetProcDefaultMemLimit()
+		// 尝试解析自定义资源配额方案，解析失败则使用默认值
+		var ok bool
+		if cpuRaw, memRaw, ok = r.parseCustomResQuotaPlan(plan); !ok {
+			cpuRaw, memRaw = config.Global.GetProcDefaultCpuLimit(), config.Global.GetProcDefaultMemLimit()
+		}
 	}
 	return r.calculateResources(cpuRaw, memRaw)
+}
+
+func (r *ProcResourcesGetter) parseCustomResQuotaPlan(plan paasv1alpha2.ResQuotaPlan) (string, string, bool) {
+	planStr := string(plan)
+	matches := paasv1alpha2.ResQuotaPlanRegex.FindStringSubmatch(planStr)
+	if len(matches) != 4 {
+		return "", "", false
+	}
+
+	cpuStr, memStr, memUnit := matches[1], matches[2], matches[3]
+
+	cpuQuantity, err := resource.ParseQuantity(cpuStr)
+	if err != nil {
+		return "", "", false
+	}
+	cpuMilli := cpuQuantity.MilliValue()
+	cpuRaw := fmt.Sprintf("%dm", cpuMilli)
+
+	// Convert memory to MiB format using resource.ParseQuantity for accurate unit handling
+	// e.g., "2G" -> "2048Mi", "256M" -> "244Mi" (since 256M = 256*1000*1000 bytes ≈ 244 MiB)
+	memQuantity, err := resource.ParseQuantity(memStr + memUnit)
+	if err != nil {
+		return "", "", false
+	}
+	memBytes := memQuantity.Value()
+	memMi := memBytes / (1024 * 1024)
+	memRaw := fmt.Sprintf("%dMi", memMi)
+
+	return cpuRaw, memRaw, true
 }
 
 // calculateResources build the resource requirements from raw string
