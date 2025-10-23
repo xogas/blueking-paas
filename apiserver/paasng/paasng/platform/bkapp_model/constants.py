@@ -60,6 +60,67 @@ class ResQuotaPlan(StrStructuredEnum):
     P_4C4G = EnumField("4C4G", label="4C4G")
 
 
+def parse_res_quota_plan(plan: str) -> tuple[str, str] | None:
+    """解析资源配额方案，返回 (cpu, memory) 元组"""
+    import re
+
+    from kubernetes.utils import parse_quantity
+
+    # 预定义方案映射
+    predefined_plans = {
+        "default": ("4000m", "1024Mi"),
+        "4C1G": ("4000m", "1024Mi"),
+        "4C2G": ("4000m", "2048Mi"),
+        "4C4G": ("4000m", "4096Mi"),
+    }
+
+    if plan in predefined_plans:
+        return predefined_plans[plan]
+
+    # 解析自定义格式：{CPU}C{Memory}
+    # 匹配格式如：2C400Mi、4C1G、0.5C512Mi
+    pattern = r"^([1-9]\d*(?:\.\d+)?|0\.\d+)C([1-9]\d*(?:\.\d+)?|0\.\d+)(M|Mi|G|Gi)$"
+    match = re.match(pattern, plan, re.IGNORECASE)
+
+    if not match:
+        return None
+
+    cpu_cores = match.group(1)
+    memory = match.group(2)
+
+    try:
+        # 验证 CPU 值的有效性（转换为 millicores）
+        cpu_float = float(cpu_cores)
+        if cpu_float <= 0:
+            return None
+        cpu_str = f"{int(cpu_float * 1000)}m"
+
+        # 验证 Memory 值的有效性（使用 kubernetes 的 parse_quantity）
+        try:
+            mem_quantity = parse_quantity(memory)
+            if mem_quantity <= 0:
+                return None
+        except (ValueError, Exception):
+            return None
+
+        return (cpu_str, memory)
+    except (ValueError, Exception):
+        return None
+
+
+def is_available_res_quota_plan(plan: str) -> bool:
+    """检查 plan 是否有效
+
+    :param plan: 资源配额方案字符串
+    :return: 是否有效
+    """
+    if not plan:
+        return False
+
+    result = parse_res_quota_plan(plan)
+    return result is not None
+
+
 class ScalingPolicy(StrStructuredEnum):
     """duplicated from paas_wl.bk_app.cnative.specs.constants.ScalingPolicy to decouple dependencies
     TODO 统一放置到一个独立于 paas_wl 和 paasng 的模块下?

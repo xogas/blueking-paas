@@ -60,6 +60,28 @@ PLAN_TO_REQUEST_QUOTA_MAP = {
 }
 
 
+# FIXME
+def parse_plan_to_limit_quota(plan: str) -> ResourceQuota:
+    """解析资源配额方案为资源限制
+
+    :param plan: 资源配额方案字符串
+    :return: ResourceQuota 对象
+    """
+    return ResourceQuota(cpu="2000m", memory="2048Mi")
+
+
+# FIXME
+def parse_plan_to_request_quota(plan: str) -> ResourceQuota:
+    """解析资源配额方案为资源请求
+
+    注意：这里计算的 requests 值仅用于前端展示，实际生效值由 operator 计算
+
+    :param plan: 资源配额方案字符串
+    :return: ResourceQuota 对象
+    """
+    return ResourceQuota(cpu="200m", memory="512Mi")
+
+
 class ResQuotaReader:
     """Read resQuotaPlan and resQuotas(envOverlay) from app model resource object
 
@@ -79,13 +101,16 @@ class ResQuotaReader:
         """
         results: dict[str, tuple[dict, bool]] = {}
         for p in self.res.spec.processes:
-            plan = p.resQuotaPlan or ResQuotaPlan.P_DEFAULT
+            plan = p.resQuotaPlan or ResQuotaPlan.P_DEFAULT.value
+            limit_quota = parse_plan_to_limit_quota(plan)
+            request_quota = parse_plan_to_request_quota(plan)
+
             results[p.name] = (
                 {
                     "plan": str(plan),
-                    "limits": asdict(PLAN_TO_LIMIT_QUOTA_MAP[plan]),
+                    "limits": asdict(limit_quota),
                     # TODO 云原生应用的 requests 取值策略在 operator 中实现. 这里的值并非实际生效值, 仅用于前端展示. 如果需要, 后续校正?
-                    "requests": asdict(PLAN_TO_REQUEST_QUOTA_MAP[plan]),
+                    "requests": asdict(request_quota),
                 },
                 False,
             )
@@ -97,11 +122,14 @@ class ResQuotaReader:
 
         for quotas in quotas_overlay:
             if quotas.envName == env_name:
+                limit_quota = parse_plan_to_limit_quota(quotas.plan)
+                request_quota = parse_plan_to_request_quota(quotas.plan)
+
                 results[quotas.process] = (
                     {
                         "plan": quotas.plan,
-                        "limits": asdict(PLAN_TO_LIMIT_QUOTA_MAP[ResQuotaPlan(quotas.plan)]),
-                        "requests": asdict(PLAN_TO_REQUEST_QUOTA_MAP[ResQuotaPlan(quotas.plan)]),
+                        "limits": asdict(limit_quota),
+                        "requests": asdict(request_quota),
                     },
                     True,
                 )

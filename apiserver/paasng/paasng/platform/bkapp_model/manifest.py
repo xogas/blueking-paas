@@ -59,7 +59,7 @@ from paasng.accessories.servicehub.sharing import ServiceSharingManager
 from paasng.accessories.servicehub.tls import list_provisioned_tls_enabled_rels
 from paasng.accessories.services.utils import gen_addons_cert_mount_dir, gen_addons_cert_secret_name
 from paasng.platform.applications.models import ModuleEnvironment
-from paasng.platform.bkapp_model.constants import PORT_PLACEHOLDER, ResQuotaPlan
+from paasng.platform.bkapp_model.constants import PORT_PLACEHOLDER, ResQuotaPlan, is_available_res_quota_plan
 from paasng.platform.bkapp_model.entities import Process
 from paasng.platform.bkapp_model.models import (
     DomainResolution,
@@ -260,14 +260,18 @@ class ProcessesManifestConstructor(ManifestConstructor):
         model_res.spec.envOverlay = overlay
 
     @staticmethod
-    def get_quota_plan(spec_plan_name: str) -> ResQuotaPlan:
-        """Get ProcessSpecPlan by name and transform it to ResQuotaPlan"""
+    def get_quota_plan(spec_plan_name: str) -> str:
+        """Get ProcessSpecPlan by name and transform it to ResQuotaPlan value."""
+
         try:
-            return ResQuotaPlan(spec_plan_name)
+            return ResQuotaPlan(spec_plan_name).value
         except ValueError:
             logger.debug(
                 "unknown ResQuotaPlan value `%s`, try to convert ProcessSpecPlan to ResQuotaPlan", spec_plan_name
             )
+
+        if is_available_res_quota_plan(spec_plan_name):
+            return spec_plan_name
 
         try:
             spec_plan = ProcessSpecPlan.objects.get_by_name(name=spec_plan_name)
@@ -283,9 +287,9 @@ class ProcessesManifestConstructor(ManifestConstructor):
         )
         for limit_memory, quota_plan in quota_plan_memory:
             if limit_memory >= expected_limit_memory:
-                return ResQuotaPlan(quota_plan)
+                return ResQuotaPlan(quota_plan).value
         # quota_plan_memory[-1][1] 是内存最大 plan
-        return ResQuotaPlan(quota_plan_memory[-1][1])
+        return ResQuotaPlan(quota_plan_memory[-1][1]).value
 
     def get_command_and_args(self, process_spec: ModuleProcessSpec) -> Tuple[List[str], List[str]]:
         """Get the command and args from the process_spec object.
