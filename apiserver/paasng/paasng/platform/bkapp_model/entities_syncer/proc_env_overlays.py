@@ -83,7 +83,7 @@ def sync_env_overlays_autoscalings(
 
 def sync_env_overlays_resources(
     module: Module,
-    overlay_resources: List[ResQuotaOverlay] | NotSetType,
+    overlay_resources: List[ResourcesOverlay] | NotSetType,
     manager: fieldmgr.FieldMgrName,
     processes: List[Process] | None = None,
 ) -> CommonSyncResult:
@@ -92,7 +92,7 @@ def sync_env_overlays_resources(
     if processes is None:
         proc_value_is_set = None
     else:
-        proc_value_is_set = {p.name: not isinstance(p.res_quota_plan, NotSetType) for p in processes}
+        proc_value_is_set = {p.name: not isinstance(p.resources, NotSetType) for p in processes}
     return syncer.sync(module, overlay_resources, manager, proc_value_is_set)
 
 
