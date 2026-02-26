@@ -141,6 +141,22 @@ class Group(OperationGroup):
         path="/api/v2/open/management/systems/{system_id}/groups/{group_id}/actions/-/policies/",
     )
 
+    # 查询超级管理员列表
+    management_super_manager_list = bind_property(
+        Operation,
+        name="management_super_manager_list",
+        method="GET",
+        path="/api/v1/open/management/super_manager/",
+    )
+
+    # 查询系统管理员列表
+    management_system_manager_list = bind_property(
+        Operation,
+        name="management_system_manager_list",
+        method="GET",
+        path="/api/v1/open/management/systems/{system_id}/managers/",
+    )
+
 
 class Client(APIGatewayClient):
     """蓝鲸权限中心提供的 OpenAPI"""

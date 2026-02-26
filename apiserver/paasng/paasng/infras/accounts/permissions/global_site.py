@@ -28,6 +28,36 @@ from .base import ProtectedResource
 from .constants import SiteAction
 
 
+def _is_iam_manager(username: str) -> bool:
+    """Check if the user is a super manager or system manager in IAM (bk-iam).
+
+    Returns True if the user is either a super manager or a system manager for the PaaS system.
+    Errors are caught and logged to avoid breaking the permission check flow.
+    """
+    import logging
+
+    from django.conf import settings
+
+    from paasng.infras.iam.client import BKIAMClient
+    from paasng.infras.iam.exceptions import BKIAMApiError, BKIAMGatewayServiceError
+
+    logger = logging.getLogger(__name__)
+
+    # Use the default tenant id for IAM queries
+    tenant_id = getattr(settings, "DEFAULT_TENANT_ID", "default")
+    try:
+        iam_client = BKIAMClient(tenant_id)
+        if iam_client.is_user_super_manager(username):
+            return True
+        if iam_client.is_user_system_manager(username):
+            return True
+    except (BKIAMApiError, BKIAMGatewayServiceError):
+        logger.warning("Failed to check IAM manager status for user %s, skip IAM check.", username)
+    except Exception:
+        logger.exception("Unexpected error when checking IAM manager status for user %s.", username)
+    return False
+
+
 class GlobalSiteResource(ProtectedResource):
     permissions = [
         (SiteAction.VISIT_SITE, "can visit site"),
@@ -48,7 +78,17 @@ class GlobalSiteResource(ProtectedResource):
         except UserProfile.DoesNotExist:
             return SiteRole.NOBODY
 
-        return SiteRole(profile.role)
+        role = SiteRole(profile.role)
+        # If the user already has a privileged role in the local profile, return it directly.
+        if role in [SiteRole.ADMIN, SiteRole.SUPER_USER, SiteRole.PLATFORM_MANAGER]:
+            return role
+
+        # For regular users, additionally check if they are a super manager or system manager
+        # in bk-iam (the permission center). If so, treat them as PLATFORM_MANAGER.
+        if _is_iam_manager(user.username):
+            return SiteRole.PLATFORM_MANAGER
+
+        return role
 
 
 def gen_site_role_perm_map(role: SiteRole) -> Dict[SiteAction, bool]:

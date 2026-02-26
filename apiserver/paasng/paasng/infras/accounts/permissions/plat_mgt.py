@@ -73,4 +73,10 @@ def user_has_plat_mgt_action_perm(user: User, action: PlatMgtAction) -> bool:
         return False
 
     # FIXME: (多租户)目前暂时使用 SiteRole，后续得切换成新的
-    return profile.role in [SiteRole.ADMIN.value, SiteRole.SUPER_USER.value]
+    if profile.role in [SiteRole.ADMIN.value, SiteRole.SUPER_USER.value, SiteRole.PLATFORM_MANAGER.value]:
+        return True
+
+    # TODO: Additionally check if the user is a super manager or system manager in bk-iam
+    from paasng.infras.accounts.permissions.global_site import _is_iam_manager
+
+    return _is_iam_manager(user.username)

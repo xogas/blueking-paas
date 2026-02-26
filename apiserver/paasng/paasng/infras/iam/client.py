@@ -543,6 +543,46 @@ class BKIAMClient:
                     )
                     raise BKIAMApiError(resp["message"], resp["code"])
 
+    def is_user_super_manager(self, username: str) -> bool:
+        """
+        检查用户是否为权限中心超级管理员
+
+        :param username: 用户名
+        :returns: 是否为超级管理员
+        """
+        try:
+            resp = self.client.management_super_manager_list()
+        except APIGatewayResponseError as e:
+            raise BKIAMGatewayServiceError(f"fetch super manager list error, detail: {e}")
+
+        if resp.get("code") != 0:
+            logger.exception(f"fetch super manager list error, message:{resp['message']}")
+            raise BKIAMApiError(resp["message"], resp["code"])
+
+        members = resp.get("data", {}).get("members", [])
+        return username in members
+
+    def is_user_system_manager(self, username: str) -> bool:
+        """
+        检查用户是否为权限中心系统管理员（针对开发者中心系统）
+
+        :param username: 用户名
+        :returns: 是否为系统管理员
+        """
+        try:
+            resp = self.client.management_system_manager_list(
+                path_params={"system_id": settings.IAM_PAAS_V3_SYSTEM_ID},
+            )
+        except APIGatewayResponseError as e:
+            raise BKIAMGatewayServiceError(f"fetch system manager list error, detail: {e}")
+
+        if resp.get("code") != 0:
+            logger.exception(f"fetch system manager list error, message:{resp['message']}")
+            raise BKIAMApiError(resp["message"], resp["code"])
+
+        members = resp.get("data", {}).get("members", [])
+        return username in members
+
     @staticmethod
     def _prepare_headers(tenant_id: str) -> dict:
         headers = {
