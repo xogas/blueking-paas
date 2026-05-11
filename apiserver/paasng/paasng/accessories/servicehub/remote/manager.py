@@ -69,6 +69,7 @@ from paasng.infras.bkmonitorv3.shim import get_or_create_bk_monitor_space
 from paasng.misc.metrics import SERVICE_PROVISION_COUNTER
 from paasng.platform.applications.models import Application, ApplicationEnvironment, ModuleEnvironment
 from paasng.platform.engine.models import EngineApp
+from paasng.platform.evaluation.providers import StaffStatusProvider
 from paasng.platform.modules.models import Module
 from paasng.utils import safe_jinja2
 from paasng.utils.i18n import gettext_lazy as i18n_lazy
@@ -374,10 +375,40 @@ class RemoteEngineAppInstanceRel(EngineAppInstanceRel):
                 module=self.db_module,
                 env=self.db_env,
                 cluster_info=cluster_info,
-                app_developers=json.dumps(self.db_application.get_developers()),
+                app_developers=json.dumps(self._filter_activate_developers),
                 bk_monitor_space_id=bk_monitor_space_id,
             )
         return result
+
+    def _filter_activate_developers(self) -> list[str]:
+        """获取应用开发者列表, 并过滤掉已离职人员
+
+        用于传递给增强服务的 asstUsers, 避免离职人员导致 provision 失败
+        """
+        developers = self.db_application.get_developers()
+        if not developers:
+            return developers
+
+        provider = StaffStatusProvider()
+        active = [u for u in developers if provider.is_active(u)]
+
+        if len(active) != len(developers):
+            inactive = set(developers) - set(active)
+            logger.info(
+                "filtered %d inactive developer(s) %s for app %s",
+                len(inactive),
+                inactive,
+                self.db_application.code,
+            )
+
+        # 极端情况下告警, 应用没有任何在职开发者/管理员("无主应用")
+        if not active:
+            logger.warning(
+                "app %s has no active developer/administrator, asstUsers will be empty",
+                self.db_application.code,
+            )
+
+        return active
 
     def get_plan(self) -> RemotePlanObj:
         plan_id = str(self.db_obj.plan_id)
